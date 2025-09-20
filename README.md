@@ -8,8 +8,17 @@
 saldo-prototype/
 ├── .gitignore
 ├── dashboard.py
+├── main.py
 ├── etl.py
 ├── README.md
+├── utils/
+│   ├── __init__.py
+│   └── data_utils.py
+├── pages/
+│   ├── __init__.py           # 👈 add this so imports work
+│   ├── dashboard.py          # defines show()
+│   ├── categorize_transactions.py
+│   └── manage_categories.py
 ├── data/
 │   ├── metadata/
 │   │   ├── accounts.csv
