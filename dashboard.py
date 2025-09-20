@@ -43,7 +43,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data
+@st.cache_data(ttl=60)  # Cache for only 60 seconds
 def load_data():
     """Load and process financial data"""
     try:
@@ -51,13 +51,28 @@ def load_data():
         transactions_path = "data/processed/transactions.csv"
         if os.path.exists(transactions_path):
             df = pd.read_csv(transactions_path)
+            st.sidebar.success(f"✅ Loaded {len(df)} transactions from CSV")
         else:
             # Create sample data if file doesn't exist
             df = create_sample_data()
+            st.sidebar.warning("📝 Using sample data - transactions.csv not found")
         
         # Convert date column to datetime
         df['date'] = pd.to_datetime(df['date'])
         df['amount'] = pd.to_numeric(df['amount'], errors='coerce')
+        
+        # Debug info
+        st.sidebar.write("**Debug Info:**")
+        st.sidebar.write(f"Raw CSV rows: {len(df)}")
+        
+        # Show month breakdown
+        if len(df) > 0:
+            df_debug = df.copy()
+            df_debug['month'] = df_debug['date'].dt.strftime('%b')
+            month_counts = df_debug['month'].value_counts().sort_index()
+            st.sidebar.write("**Month breakdown:**")
+            for month, count in month_counts.items():
+                st.sidebar.write(f"- {month}: {count}")
         
         # Load metadata
         metadata = load_metadata()
@@ -302,6 +317,13 @@ def main():
     st.title("💰 Saldo - Personal Finance Dashboard")
     st.markdown("Track your expenses, analyze spending patterns, and manage your finances effectively.")
     
+    # Add refresh button
+    col1, col2 = st.columns([4, 1])
+    with col2:
+        if st.button("🔄 Refresh Data"):
+            st.cache_data.clear()
+            st.experimental_rerun()
+    
     # Load data
     df, metadata = load_data()
     
@@ -393,21 +415,43 @@ def main():
     
     # Account filter
     if 'accounts' in metadata and not metadata['accounts'].empty:
-        account_names = metadata['accounts']['account_name'].tolist()
-        selected_accounts = st.sidebar.multiselect(
+        # Get unique account IDs from actual data
+        actual_account_ids = df['account_id'].unique().tolist()
+        
+        # Map actual account IDs to names, or use ID if no mapping exists
+        account_options = []
+        account_id_map = {}
+        
+        for acc_id in actual_account_ids:
+            matching_account = metadata['accounts'][metadata['accounts']['account_id'] == acc_id]
+            if not matching_account.empty:
+                account_name = matching_account['account_name'].iloc[0]
+                account_options.append(f"{account_name} ({acc_id})")
+                account_id_map[f"{account_name} ({acc_id})"] = acc_id
+            else:
+                account_options.append(f"Account {acc_id}")
+                account_id_map[f"Account {acc_id}"] = acc_id
+        
+        selected_account_options = st.sidebar.multiselect(
             "Select Accounts",
-            options=account_names,
-            default=account_names
+            options=account_options,
+            default=account_options  # Select all by default
         )
         
-        # Filter by selected accounts
-        account_ids = metadata['accounts'][
-            metadata['accounts']['account_name'].isin(selected_accounts)
-        ]['account_id'].tolist()
+        # Get selected account IDs
+        selected_account_ids = [account_id_map[option] for option in selected_account_options]
         
-        df_filtered = df[df['account_id'].isin(account_ids)]
+        df_filtered = df[df['account_id'].isin(selected_account_ids)]
+        
+        # Debug account filtering
+        st.sidebar.write(f"**Account Debug:**")
+        st.sidebar.write(f"- Actual account IDs in data: {actual_account_ids}")
+        st.sidebar.write(f"- Selected account IDs: {selected_account_ids}")
+        st.sidebar.write(f"- Rows after account filter: {len(df_filtered)}")
+        
     else:
         df_filtered = df
+        st.sidebar.write("**Account Debug:** No account metadata, showing all data")
     
     # Category filter
     if 'category' in df_filtered.columns:
@@ -420,6 +464,7 @@ def main():
         df_filtered = df_filtered[df_filtered['category'].isin(selected_categories)]
     
     # Apply date filter
+    df_filtered_pre_date = df_filtered.copy()  # Store for debugging
     df_filtered = df_filtered[
         (df_filtered['date'] >= pd.to_datetime(start_date)) &
         (df_filtered['date'] <= pd.to_datetime(end_date))
@@ -427,6 +472,21 @@ def main():
     
     # Fix transaction count - count unique transactions
     total_transactions = len(df_filtered)
+    
+    # Debug: Show filtering details
+    if st.sidebar.checkbox("Show Debug Info"):
+        st.sidebar.write("**Filtering Debug:**")
+        st.sidebar.write(f"Original data: {len(df)} rows")
+        st.sidebar.write(f"After account filter: {len(df_filtered_pre_date) if 'df_filtered_pre_date' in locals() else 'N/A'}")
+        st.sidebar.write(f"After date filter: {len(df_filtered)} rows")
+        st.sidebar.write(f"Selected period: {start_date} to {end_date}")
+        
+        # Show what's actually in the filtered data
+        if len(df_filtered) > 0:
+            filtered_months = df_filtered['date'].dt.strftime('%b %Y').value_counts()
+            st.sidebar.write("**Filtered data months:**")
+            for month, count in filtered_months.items():
+                st.sidebar.write(f"- {month}: {count}")
     
     # Calculate KPIs
     kpis = calculate_kpis(df_filtered, pd.to_datetime(start_date), pd.to_datetime(end_date))
